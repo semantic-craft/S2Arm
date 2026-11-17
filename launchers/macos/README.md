@@ -151,6 +151,17 @@ signs native code and audits runtime links. The host and C# preparation tools ar
 compiled during application packaging, never on the player's machine. This is a
 local ad-hoc build; this PR does not publish a notarized binary release.
 
+#### Release signing and notarization
+
+Use `launchers/macos/sign_release.sh <path/to/S2Arm.app>` to Developer ID sign,
+notarize, staple, and archive `S2Arm.zip` in the same parent directory:
+
+- `S2A_SIGN_KEYCHAIN` (required) selects the keychain holding the `Developer ID Application` certificate; set `S2A_SIGN_KEYCHAIN_PASS_FILE` to unlock it from a password file.
+- `Contents/Resources/Shell` stays unsigned so the prebuilt iOS shell preserves `Shell/manifest.json`, and `Engine/engine.json` plus `Prepare/prepare.json` are recomputed after signing nested bundles.
+- For notarization (enabled unless `S2A_NOTARIZE=0`), if `ASC_KEY_PATH`, `ASC_KEY_ID`, and `ASC_ISSUER` are all set, `sign_release.sh` submits with App Store Connect API key credentials.
+- Otherwise, `sign_release.sh` resolves the keychain profile from `S2A_NOTARY_PROFILE`, then `NOTARY_PROFILE`, then `macos-notary-profile` (on `PATH` or `"$HOME/.local/bin/macos-notary-profile"`), and submits with `--keychain-profile`.
+- Set `S2A_NOTARIZE=0` to skip notarization and Gatekeeper assessment (`spctl`).
+
 ### Using the built app
 
 The packaged app includes the S2Arm NativeAOT/Metal Mac host, NSP/XCI reader and
