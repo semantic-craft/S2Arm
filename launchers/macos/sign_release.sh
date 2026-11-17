@@ -5,8 +5,7 @@
 # 公证要求包里每个 Mach-O 都用 Developer ID + 强化运行时 + 时间戳签：由里到外逐个签，再签嵌套 .app，最后签整包。
 #   强化运行时的授权项（release.entitlements）放宽到与 ad-hoc 时等效：.NET 要 JIT、游戏宿主要可写可执行内存、各运行库互相加载不校验签名者。
 # 环境：S2A_SIGN_KEYCHAIN 放证书的钥匙串；S2A_SIGN_KEYCHAIN_PASS_FILE 钥匙串口令文件（只从文件读，不打印、不进日志）；
-#       公证默认走钥匙串配置（S2A_NOTARY_PROFILE / NOTARY_PROFILE，或 macos-notary-profile 解析）；
-#       也可同时设齐 ASC_KEY_ID / ASC_ISSUER / ASC_KEY_PATH 走 App Store Connect 接口密钥（CI 兼容）。S2A_NOTARIZE=0 只签不公证。
+#       ASC_KEY_ID / ASC_ISSUER / ASC_KEY_PATH App Store Connect 接口密钥（公证用）。S2A_NOTARIZE=0 只签不公证。
 set -euo pipefail
 APP=$(cd "$1" && pwd); HERE=$(cd "$(dirname "$0")" && pwd); ENT=$HERE/release.entitlements; KC=${S2A_SIGN_KEYCHAIN:?请设 S2A_SIGN_KEYCHAIN}
 if [ -n "${S2A_SIGN_KEYCHAIN_PASS_FILE:-}" ]; then security unlock-keychain -p "$(cat "$S2A_SIGN_KEYCHAIN_PASS_FILE")" "$KC"; fi
@@ -69,33 +68,9 @@ codesign -d -r- "$APP" 2>&1 | grep -q 'designated => .*certificate leaf' || { ec
 echo "签名：$n 个 Mach-O + 整包，Developer ID，强化运行时，校验通过"
 Z=$(dirname "$APP")/S2Arm.zip; rm -f "$Z"
 if [ "${S2A_NOTARIZE:-1}" != 0 ]; then
-  use_api_key=0
-  notary_profile=""
-  if [ -n "${ASC_KEY_PATH:-}" ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER:-}" ]; then
-    use_api_key=1
-  else
-    notary_profile=${S2A_NOTARY_PROFILE:-${NOTARY_PROFILE:-}}
-    if [ -z "$notary_profile" ]; then
-      notary_helper=$(command -v macos-notary-profile 2>/dev/null || true)
-      if [ -z "$notary_helper" ] && [ -x "$HOME/.local/bin/macos-notary-profile" ]; then
-        notary_helper="$HOME/.local/bin/macos-notary-profile"
-      fi
-      if [ -n "$notary_helper" ]; then
-        notary_profile=$("$notary_helper") || notary_profile=""
-      fi
-    fi
-    if [ -z "$notary_profile" ]; then
-      echo "【红】未配置公证凭据：请安装 macos-notary-profile，设置 S2A_NOTARY_PROFILE / NOTARY_PROFILE，或同时提供 ASC_KEY_PATH、ASC_KEY_ID 与 ASC_ISSUER" >&2
-      exit 4
-    fi
-  fi
   ditto -c -k --keepParent "$APP" "$Z"
   log=$(dirname "$APP")/notary.log
-  if [ "$use_api_key" = 1 ]; then
-    xcrun notarytool submit "$Z" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait > "$log" 2>&1 || true
-  else
-    xcrun notarytool submit "$Z" --keychain-profile "$notary_profile" --wait > "$log" 2>&1 || true
-  fi
+  xcrun notarytool submit "$Z" --key "${ASC_KEY_PATH:?}" --key-id "${ASC_KEY_ID:?}" --issuer "${ASC_ISSUER:?}" --wait > "$log" 2>&1 || true
   grep -q 'status: Accepted' "$log" || { echo "【红】公证没通过，见 ${log}（xcrun notarytool log <id> 看逐项原因）" >&2; exit 4; }
   xcrun stapler staple "$APP" > /dev/null
   rm -f "$Z"
